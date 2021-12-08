@@ -1,0 +1,124 @@
+- name: create Vault user
+  hosts: mainserver
+  become: yes
+  become_user: root
+  tasks:
+      - name: Creating vault user group
+        group: 
+          name: "vault_group"
+        become: true
+      - name: Creating vault user
+        user:
+          name: "vault_user"
+          group: "vault_group"
+          system: yes
+          shell: "/sbin/nologin"
+          comment: "vault nologin User"
+          createhome: "no"
+          state: present
+      - name: Download binary
+        get_url:
+          url: https://releases.hashicorp.com/vault/1.8.1/vault_1.8.1_linux_amd64.zip
+          dest: /tmp/vault_1.8.1_linux_amd64.zip
+          owner: "vault_user"
+          group: "vault_group"
+          mode: 0755
+        register: vault_download
+      - name: "Unzip vault archive"
+        unarchive:
+          src: /tmp/vault_1.8.1_linux_amd64.zip
+          dest: /usr/local/bin
+          copy: no
+          owner: "vault_user"
+          group: "vault_group"
+          mode: 0755
+      - name: "Set vault binary capabilities"
+        capabilities:
+          path: /usr/local/bin/vault
+          capability: cap_ipc_lock+ep
+          state: present
+      - name: Creating a file with content
+        copy:
+          content: |
+            [Unit]
+            Description=Tool for managing secrets
+            Documentation=https://vaultproject.io/docs/
+            After=network.target
+            ConditionFileNotEmpty=/etc/vault.hcl
+            [Service]
+            User=vault_user
+            Group=vault_group
+            ExecStart=/usr/local/bin/vault server -config=/etc/vault.hcl
+            ExecReload=/usr/local/bin/kill --signal HUP $MAINPID
+            CapabilityBoundingSet=CAP_SYSLOG CAP_IPC_LOCK
+            AmbientCapabilities=CAP_IPC_LOCK
+            SecureBits=keep-caps
+            NoNewPrivileges=yes
+            KillSignal=SIGINT
+            [Install]
+            WantedBy=multi-user.target
+
+          dest: /etc/systemd/system/vault.service
+          owner: root
+          group: root
+      - name: Creating a file with content
+        copy:
+          content: |
+            disable_mlock = true
+            ui            = true
+            listener "tcp" {  address     = "127.0.0.1:8834"  tls_disable = "true"}
+            storage "file" {  path = "/tmp/vault-data"}
+            scheme = "http"
+            redirect_addr = "18.142.57.106:8834"
+            VAULT_ADDR = "18.142.57.106:8834"
+
+            # This section grants all access on "secret/*". Further restrictions can be
+            # applied to this broad policy, as shown below.
+            path "secret/*" {
+              capabilities = ["create", "read", "update", "delete", "list"]
+            }
+
+            # Even though we allowed secret/*, this line explicitly denies
+            # secret/super-secret. This takes precedence.
+            path "secret/super-secret" {
+              capabilities = ["deny"]
+            }
+
+
+          dest: /etc/vault.hcl
+          owner: "vault_user"
+          group: "vault_group"
+      - name: vault service
+        service:
+          name: vault
+          state: started
+          enabled: yes
+      - name: Create unseal directories
+        file:
+          path: "/home/ubuntu/vault/unseal"
+          state: directory
+        delegate_to: localhost
+      - name: Create root key directories
+        file:
+          path: "/home/ubuntu/vault/root_key"
+          state: directory
+        delegate_to: localhost
+     # - name: Initialise Vault operator
+      #  shell: vault operator init -key-shares=5 -key-threshold=3 -format json
+       # environment:
+        #  VAULT_ADDR: "http://127.0.0.1:8834"
+        #register: vault_init_results
+      - name: Parse output of vault init
+        set_fact:
+          vault_init_parsed: "vault_init_results.stdout | from_json"
+      - name: Write unseal keys to files
+        copy:
+          dest: "/home/ubuntu/vault/unseal/unseal_key_item.0"
+          content: "item.1"
+        with_indexed_items: "vault_init_parsed.unseal_keys_hex"
+        delegate_to: localhost
+      - name: Write root token to file
+        copy:
+          content: "vault_init_parsed.root_token"
+          dest: "/home/ubuntu/vault/root_key/rootkey"
+        delegate_to: localhost

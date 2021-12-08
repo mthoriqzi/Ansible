@@ -1,0 +1,121 @@
+---
+- name: set up node-exporter
+  hosts: monitoringdev
+  become: yes
+  become_user: root
+  tasks:
+    - name: craete directory node-exporter
+      ansible.builtin.file: 
+        state: directory 
+        path: /home/ec2-user/node-exporter
+
+    - name: download sources node-exporter
+      get_url: 
+        url=https://github.com/prometheus/node_exporter/releases/download/v1.2.2/node_exporter-1.2.2.linux-amd64.tar.gz
+        dest=/home/ec2-user/node-exporter
+    - name: Extract foo.tgz into /var/lib/foo
+      ansible.builtin.unarchive:
+        src: /home/ec2-user/node-exporter/node_exporter-1.2.2.linux-amd64.tar.gz
+        dest: /home/ec2-user/node-exporter
+        remote_src: yes
+    - name: Copy file with owner and permissions
+      ansible.builtin.copy:
+        src: /home/ec2-user/node-exporter/node_exporter-1.2.2.linux-amd64/node_exporter
+        dest: /usr/local/bin
+        mode: '0744'
+        remote_src: yes
+    - name: Creating a file with content
+      copy:
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter  --web.listen-address=:9111
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/node-exporter.service
+    - name: Start service node-exporter, if not started
+      ansible.builtin.service:
+        name: node-exporter
+        state: started
+- name: set up push gateway
+  hosts: monitoringdev
+  become: yes
+  become_user: root
+  tasks:
+    - name: craete directory pushgateway
+      ansible.builtin.file: 
+        state: directory 
+        path: /home/ec2-user/pushgateway
+
+    - name: download sources pushgateway
+      get_url: 
+        url=https://github.com/prometheus/pushgateway/releases/download/v0.8.0/pushgateway-0.8.0.linux-amd64.tar.gz
+        dest=/home/ec2-user/pushgateway
+    - name: Extract foo.tgz into /var/lib/foo
+      ansible.builtin.unarchive:
+        src: /home/ec2-user/pushgateway/pushgateway-0.8.0.linux-amd64.tar.gz
+        dest: /home/ec2-user/pushgateway
+        remote_src: yes
+    - name: Copy file with owner and permissions
+      ansible.builtin.copy:
+        src: /home/ec2-user/pushgateway/pushgateway-0.8.0.linux-amd64/pushgateway
+        dest: /usr/local/bin
+        mode: '0744'
+        remote_src: yes
+    - name: Creating a file with content
+      copy:
+        content: |
+          [Unit]
+          Description=pushgateway
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          ExecStart=/usr/local/bin/pushgateway  --web.listen-address=:9112
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/pushgateway.service
+    - name: Start service pushgateway, if not started
+      ansible.builtin.service:
+        name: pushgateway
+        state: started
+    - name: Creating a file better-top with content
+      copy:
+        content: |
+          #!/bin/bash
+          z=$(ps aux)
+          while read -r z
+          do
+          var=$var$(awk '{print "cpu_usage{process=\""$11"\", pid=\""$2"\"}", $3z}');
+          done <<< "$z"
+          curl -X POST -H  "Content-Type: text/plain" --data "$var
+          " http://localhost:9112/metrics/job/top/instance/machine
+        dest: /home/ec2-user/pushgateway/better-top
+        mode: '0744'
+    - name: run better-top
+      shell : while sleep 1; do ./home/ec2-user/pushgateway/better-top; done;
+      args:
+        warn: false
+
+- name: update prometheus
+  hosts: monitoringserver
+  become: yes
+  become_user: root
+  tasks:
+    - name: update prometheus
+      shell: >
+        sudo sed -i 's/^            - targets\: \[\"/            - targets\: \[\"tes/g' /usr/local/bin/prometheus/prometheus.yml
+      args:
+        warn: false
+    - name: Just force systemd to reread configs
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: yes
+        name: prometheus
+

@@ -1,0 +1,58 @@
+---
+- name: Playbook to create users
+  hosts: clientubuntu
+  become: yes
+  become_user: root
+  tasks:
+
+      - user:
+          name: user1
+          password: "{{ 'xxx' | password_hash('sha512') }}"
+          group: sudo
+          state: present
+          shell: /bin/bash
+
+
+- name: input public key to user
+  hosts: clientubuntu
+  become: yes
+  become_user: root
+  tasks:
+    - name: input publickey user1
+      ansible.posix.authorized_key:
+          user: user1
+          state: present
+          key: '{{ item }}'
+      with_file:
+              - ~/.ssh/user1.pub
+              - ~/.ssh/id_rsa.pub
+
+- name: Set maximum expiration date for password
+  hosts: clientubuntu
+  become: yes
+  become_user: root
+  tasks:
+    - name: replace password max
+      shell: sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/g' /etc/login.defs
+      args:
+        warn: false
+    - name: replace password min
+      shell: sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 3/g' /etc/login.defs
+      args:
+        warn: false
+    - name: replace password warn
+      shell: sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE 7/g' /etc/login.defs
+      args:
+        warn: false
+
+- name: test update app
+  hosts: clientubuntu
+  become: yes
+  become_user: root
+  roles:
+    - role: gantsign.pwquality
+      pwquality_minlen: 16
+      pwquality_maxrepeat: 3
+      pwquality_ucredit: 0 #minimal uppercase
+      pwquality_lcredit: 0 #minimal lowercase
+      pwquality_ocredit: 0 #minimal other character

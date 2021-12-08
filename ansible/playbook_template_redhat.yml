@@ -1,0 +1,67 @@
+---
+- name: Playbook to create users
+  hosts: clientredhat
+  become: yes
+  become_user: root
+  tasks:
+
+      - user:
+          name: murdocal-adm
+          password: "{{ 'murdocal' | password_hash('sha512') }}"
+          group: wheel
+          state: present
+          shell: /bin/bash
+
+      - user:
+          name: junaedan-adm
+          password: "{{ 'junaedan' | password_hash('sha512') }}"
+          group: wheel
+          state: present
+          shell: /bin/bash
+
+- name: input public key to user
+  hosts: clientredhat
+  become: yes
+  become_user: root
+  tasks:
+    - name: input publickey user murdocal-adm
+      ansible.posix.authorized_key:
+          user: murdocal-adm
+          state: present
+          key: '{{ item }}'
+      with_file:
+              - ~/.ssh/murdocal.pub
+              - ~/.ssh/id_rsa.pub
+    - name: input publickey user junaedan-adm
+      ansible.posix.authorized_key:
+          user: junaedan-adm
+          state: present
+          key: '{{ item }}'
+      with_file:
+              - ~/.ssh/junaedan-adm-key.pub
+              - ~/.ssh/id_rsa.pub
+- name: Set maximum minimum expiration date for password 
+  hosts: clientredhat
+  become: yes
+  become_user: root
+  tasks:
+    - name: replace password max expire days
+      shell: sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 90/g' /etc/login.defs
+      args:
+        warn: false
+    - name: replace password min expire days
+      shell: sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 3/g' /etc/login.defs
+      args:
+        warn: false
+    - name: replace password warn expire days
+      shell: sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE 7/g' /etc/login.defs
+      args:
+        warn: false
+    - name: replace password min length
+      shell: sed -i 's/^PASS_MIN_LEN.*/PASS_MIN_LEN 12/g' /etc/login.defs
+      args:
+        warn: false
+    - name: replace password minimum requirment char
+      shell:  sed -i 's/^password    requisite                                    pam_pwquality.so try_first_pass local_users_only.*/password    requisite                                    pam_pwquality.so try_first_pass local_users_only retry=3 authok_type= lcredit=-2 ucredit=-1 dcredit=-1 ocredit=-1 enforce_for_root/g' /etc/pam.d/system-auth
+      args:
+        warn: false
